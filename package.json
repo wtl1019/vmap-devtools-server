@@ -1,0 +1,25 @@
+{
+  "name": "@ali/vmap-devtools-server",
+  "version": "1.0.0",
+  "bin": {
+    "fd": "./bin/index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "main": "./src/index.js",
+  "author": "",
+  "license": "ISC",
+  "description": "Vmap DevTools server",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/monatheoctocat/my_package.git"
+  },
+  "dependencies": {
+    "axios": "^0.16.2",
+    "commander": "^2.20.0",
+    "nodejs-websocket": "^1.7.2",
+    "remotedev-server": "0.2.7",
+    "socketcluster-client": "13.0.0"
+  }
+}
