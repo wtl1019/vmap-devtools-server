@@ -4,6 +4,8 @@ const startSocket = require("./startSocket");
 program.version('0.0.1');
 program
     .option('-p, --port <int>', '启动socket服务的端口');
+program
+    .option('-host, --host <int>', '启动socket服务的ip');
 program.parse(process.argv);
 
 if (!program.host) {

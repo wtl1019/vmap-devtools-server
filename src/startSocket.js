@@ -3,13 +3,14 @@ const axios = require('axios');
 var ws = require("ws");
 
 var socket1;
+var reduxDevTools = require('remotedev-server');
+var socketCluster = require('socketcluster-client');
 
-module.exports = function (host, port) {
+module.exports = function (ip, port) {
     /**
      * （wsServer1）:启动redux-devtools-cli，提供与插件通信的websocket服务
      */
     function startServer1() {
-        var reduxDevTools = require('remotedev-server');
         var server = reduxDevTools({ hostname: HOST, port: port, wsEngine: 'ws' });
         console.log('*'.repeat(50))
         console.log(`插件需要配置host为：${HOST}，端口号：${port}`);
@@ -23,7 +24,6 @@ module.exports = function (host, port) {
         /**
          * 执行client端，通过wsServer1与插件进行通信
          */
-        var socketCluster = require('socketcluster-client');
         socket1 = socketCluster.connect({
             hostname: HOST,
             port: port
@@ -56,7 +56,7 @@ module.exports = function (host, port) {
                     // 出错重试
                     if (retryTimes < MAX_RETRY_TIMES) {
                         retryTimes++;
-                        console.log('几秒后重试第 ' + retryTimes + ' 次');
+                        console.log('3秒后重试第 ' + retryTimes + ' 次');
                         setTimeout(() => {
                             login();
                         }, 3000);
@@ -64,7 +64,6 @@ module.exports = function (host, port) {
                     return;
                 }
                 const channel = socket1.subscribe(channelName);
-                console.log('**channelName===>', channelName);
                 channel.watch(handleMessages);
                 socket1.on(channelName, handleMessages);
                 console.log('login成功');
@@ -79,11 +78,11 @@ module.exports = function (host, port) {
      * 存在 ’vmap_debugtools_service‘， 则链接socket服务
      */
     function getJson() {
-        axios.get(`http://${host}:8888/json`)
+        axios.get(`http://${ip}:8888/json`)
             .then(response => {
                 const vmapItem = response.data.filter(item => item.title === 'vmap_debugtools_service')
                 if (vmapItem && vmapItem.length) {
-                    handleVmapSocket(`ws://${host}:8888/devtools/page/${vmapItem[0].id}`)
+                    handleVmapSocket(`ws://${ip}:8888/devtools/page/${vmapItem[0].id}`)
                 } else {
                     retryAction(getJson, 99999, 1000)
                 }
@@ -93,15 +92,15 @@ module.exports = function (host, port) {
             });
     }
 
-     /**
-     * 1. 建立vmap socket链接，获取数据
-     * 2. 将接收到的数据，发送给redux-server服务
-     */
+    /**
+    * 1. 建立vmap socket链接，获取数据
+    * 2. 将接收到的数据，发送给redux-server服务
+    */
     const handleVmapSocket = (url) => {
         var socket2 = new ws(url);
 
         socket2.on('open', function () {
-            console.log("('**connect success !!!!");
+            console.log("('**socket2 connect success !!!!");
         })
 
         socket2.on('message', function (data) {
@@ -154,7 +153,7 @@ module.exports = function (host, port) {
     function retryAction(action, times, delay) {
         if (count < times) {
             count++;
-            console.log(`${delay}秒后重试第${count}次`);
+            console.log(`【获取json通道链接】${delay / 1000}秒后重试第${count}次`);
             setTimeout(() => {
                 action && action();
             }, delay);
