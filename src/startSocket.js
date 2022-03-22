@@ -3,6 +3,7 @@ const axios = require('axios');
 var ws = require("ws");
 
 var socket1;
+var socket2;
 var reduxDevTools = require('remotedev-server');
 var socketCluster = require('socketcluster-client');
 
@@ -10,7 +11,7 @@ module.exports = function (ip, port) {
     /**
      * （wsServer1）:启动redux-devtools-cli，提供与插件通信的websocket服务
      */
-    function startServer1() {
+    function startReduxDevTlServer() {
         var server = reduxDevTools({ hostname: HOST, port: port, wsEngine: 'ws' });
         console.log('*'.repeat(50))
         console.log(`插件需要配置host为：${HOST}，端口号：${port}`);
@@ -48,6 +49,10 @@ module.exports = function (ip, port) {
 
                 function handleMessages(message) {
                     console.log('handleMessages', message)
+                    /**
+                     * 给vmap服务发送请求获取页面数据
+                     */
+                    socket2.emit(JSON.stringify(message));
                 }
 
                 if (error) {
@@ -82,7 +87,7 @@ module.exports = function (ip, port) {
             .then(response => {
                 const vmapItem = response.data.filter(item => item.title === 'vmap_debugtools_service')
                 if (vmapItem && vmapItem.length) {
-                    handleVmapSocket(`ws://${ip}:8888/devtools/page/${vmapItem[0].id}`)
+                    connectVmapSocket(`ws://${ip}:8888/devtools/page/${vmapItem[0].id}`)
                 } else {
                     retryAction(getJson, 99999, 1000)
                 }
@@ -96,8 +101,8 @@ module.exports = function (ip, port) {
     * 1. 建立vmap socket链接，获取数据
     * 2. 将接收到的数据，发送给redux-server服务
     */
-    const handleVmapSocket = (url) => {
-        var socket2 = new ws(url);
+    const connectVmapSocket = (url) => {
+        socket2 = new ws(url);
 
         socket2.on('open', function () {
             console.log("('**socket2 connect success !!!!");
@@ -146,6 +151,7 @@ module.exports = function (ip, port) {
         socket1.emit(socket1.id ? 'log' : 'log-noid', message);
     }
 
+
     /**
      * 用户未打开vmap调试开关前，轮训判断
      */
@@ -161,7 +167,7 @@ module.exports = function (ip, port) {
     }
 
 
-    startServer1();
+    startReduxDevTlServer();
     setTimeout(function () {
         middleClient();
     }, 2000)
