@@ -4,27 +4,42 @@ var ws = require("ws");
 
 var socket1;
 var socket2;
-var reduxDevTools = require('remotedev-server');
-var socketCluster = require('socketcluster-client');
+var lockReconnect = false; //避免重复连接
 
-module.exports = function (ip, port) {
+/**
+ * vmap服务说明：
+ *   包含一个 reduxDevTools  server1，和两个客户端
+ *   socket2 是用来连接json通道，该通道是用来下发真实数据的
+ *   socket1 是作为中介，将json通道下发的数据转发给 server1。此客户端主要是理解清login的作用
+ * 
+ *  杀app进程，重连逻辑： server1， socket1 不动，只对 socket2 进行重连
+ */
+
+module.exports = function (ip, port, jsonport) {
+    let appPort = jsonport
+    const vmap_json_key = 'vmap_debugtools_service'
     /**
      * （wsServer1）:启动redux-devtools-cli，提供与插件通信的websocket服务
      */
-    function startReduxDevTlServer() {
-        var server = reduxDevTools({ hostname: HOST, port: port, wsEngine: 'ws' });
+    function startServer1() {
+        let reduxDevTools = require('remotedev-server');
+        let server = reduxDevTools({ hostname: HOST, port: port, wsEngine: 'ws' });
         console.log('*'.repeat(50))
         console.log(`插件需要配置host为：${HOST}，端口号：${port}`);
         console.log('*'.repeat(50));
 
         return server;
     }
+    startServer1()
 
-
+    /**
+     * socket2 与 server1 的中介，作为数据的中间传递人, 可以认为前端链接的是它
+     */
     function middleClient() {
         /**
          * 执行client端，通过wsServer1与插件进行通信
          */
+        let socketCluster = require('socketcluster-client');
         socket1 = socketCluster.connect({
             hostname: HOST,
             port: port
@@ -46,13 +61,23 @@ module.exports = function (ip, port) {
         let retryTimes = 0;
         function login() {
             socket1.emit('login', 'master', function (error, channelName) {
-
                 function handleMessages(message) {
                     console.log('handleMessages', message)
-                    /**
-                     * 给vmap服务发送请求获取页面数据
-                     */
-                    socket2.emit(JSON.stringify(message));
+                    switch(message.type) {
+                        case 'START':
+                            getJson();
+                            break;
+                        case 'JSONPORT_CHANGEH':
+                            // APP 端口变化，client2 重连; message.state 为兼容前端代码，做最小改动，未语义化
+                            appPort = message.state;
+                            break;
+                        default:
+                            /**
+                             * 给vmap服务发送请求获取页面数据
+                             */
+                            socket2.send(JSON.stringify(message));
+                            break;
+                    }
                 }
 
                 if (error) {
@@ -71,7 +96,7 @@ module.exports = function (ip, port) {
                 const channel = socket1.subscribe(channelName);
                 channel.watch(handleMessages);
                 socket1.on(channelName, handleMessages);
-                console.log('login成功');
+                console.log('login成功', `channelName=====>${channelName}` );
             });
         }
         login();
@@ -80,54 +105,82 @@ module.exports = function (ip, port) {
     /**
      * 获取socket链接列表json
      * 若无 ’vmap_debugtools_service‘， 则轮训json
-     * 存在 ’vmap_debugtools_service‘， 则链接socket服务
+     * 存在 ’vmap_debugtools_service‘， 连接
      */
-    function getJson() {
-        axios.get(`http://${ip}:8888/json`)
-            .then(response => {
-                const vmapItem = response.data.filter(item => item.title === 'vmap_debugtools_service')
+    let timer = null;
+    async function getJson() {
+        const appUrl = `${ip}:${appPort}`
+        try {
+            const response = await axios.get(`http://${appUrl}/json`)
+            if (
+                response
+                && response.data
+                && Array.isArray(response.data)
+                && response.data.length
+            ) {
+                const vmapItem = response.data.filter(item => item.title === vmap_json_key)
                 if (vmapItem && vmapItem.length) {
-                    connectVmapSocket(`ws://${ip}:8888/devtools/page/${vmapItem[0].id}`)
+                    connectVmapSourceDateServer(`ws://${appUrl}/devtools/page/${vmapItem[0].id}`)
                 } else {
-                    retryAction(getJson, 99999, 1000)
+                    retryGetJson()
                 }
-            })
-            .catch(error => {
-                console.log(error);
-            });
+            } else {
+                retryGetJson()
+            }
+        } catch (error) {
+            retryGetJson()
+        }
+    }
+
+    function retryGetJson() {
+        console.log(`***2秒后重试【getJson】***`);
+        timer && clearTimeout(timer)
+        timer = setTimeout(() => {
+            getJson()
+        }, 2000)
     }
 
     /**
-    * 1. 建立vmap socket链接，获取数据
-    * 2. 将接收到的数据，发送给redux-server服务
+    * 1. 建立链接，将接收到的数据，借socket1发送给redux-server服务
     */
-    const connectVmapSocket = (url) => {
+    const connectVmapSourceDateServer = (url) => {
         socket2 = new ws(url);
 
         socket2.on('open', function () {
-            console.log("('**socket2 connect success !!!!");
+            console.log("('***socket2 connect success***");
+            const message = { type: 'CONNECTION', payload: 1 }
+            socket1.emit('log', message);
         })
 
         socket2.on('message', function (data) {
             const result = JSON.parse(data.toString())
-            console.log('**socket2 result====>', result)
-            notifyReduxServer(result)
+            console.log('***socket2 result***', result)
+            notifyServer1(result)
         })
 
-        socket2.on("error", function (err) {
-            console.log("**socket2 error: ", err);
+        socket2.on("error", function (code, reason) {
+            console.log("***socket2异常关闭*** " + code);
+            console.log(reason);
+            // 通知devtools
+            const message = { type: 'DISCONNECTED', code };
+            socket1.emit('log', message);
+            getJson()
         });
 
         socket2.on("close", function () {
-            console.log("**socket2 close");
+            console.log("***socket2关闭连接***");
+            // 通知devtools
+            const message = { type: 'DISCONNECTED', code: 0 };
+            socket1.emit('log', message);
+            // 断开时轮训连接
+            getJson();
         });
     }
 
-
     /**
-     * 格式化数据，并发送给 redux-server
+     * 格式化数据，发给 redux-server
      */
-    const notifyReduxServer = (result) => {
+    const notifyServer1 = (result) => {
         // VMAP调试指令返回的数据
         if ('responseId' in result) {
             socket1.emit('log', {
@@ -151,27 +204,16 @@ module.exports = function (ip, port) {
         socket1.emit(socket1.id ? 'log' : 'log-noid', message);
     }
 
-
-    /**
-     * 用户未打开vmap调试开关前，轮训判断
-     */
-    let count = 0;
-    function retryAction(action, times, delay) {
-        if (count < times) {
-            count++;
-            console.log(`【获取json通道链接】${delay / 1000}秒后重试第${count}次`);
-            setTimeout(() => {
-                action && action();
-            }, delay);
-        }
+    function reconnect(url) {
+        if (lockReconnect) return;
+        lockReconnect = true;
+        setTimeout(function() {
+            connectVmapSourceDateServer(url);
+            lockReconnect = false;
+        }, 2000);
     }
 
-
-    startReduxDevTlServer();
     setTimeout(function () {
-        middleClient();
-    }, 2000)
-    setTimeout(function () {
-        getJson()
-    }, 4000)
+        middleClient()
+    }, 1000)
 };

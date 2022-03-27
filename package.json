@@ -1,6 +1,6 @@
 {
   "name": "@ali/vmap-devtools-server",
-  "version": "1.0.4",
+  "version": "1.2.0",
   "bin": {
     "fd": "./bin/index.js"
   },
