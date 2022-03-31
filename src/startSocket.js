@@ -5,6 +5,7 @@ var ws = require("ws");
 var socket1;
 var socket2;
 var lockReconnect = false; //避免重复连接
+let socketCluster = require('socketcluster-client');
 
 /**
  * vmap服务说明：
@@ -22,13 +23,20 @@ module.exports = function (ip, port, jsonport) {
      * （wsServer1）:启动redux-devtools-cli，提供与插件通信的websocket服务
      */
     function startServer1() {
-        let reduxDevTools = require('remotedev-server');
-        let server = reduxDevTools({ hostname: HOST, port: port, wsEngine: 'ws' });
-        console.log('*'.repeat(50))
-        console.log(`插件需要配置host为：${HOST}，端口号：${port}`);
-        console.log('*'.repeat(50));
+        console.log(`插件需要配置host：${HOST}，端口号${port}`);
 
-        return server;
+        let reduxDevTools = require('remotedev-server');
+        reduxDevTools({ hostname: HOST, port: port, wsEngine: 'ws' }).then((result) => {
+            console.log('remotedev-server启动结果', result)
+            if(result && result.portAlreadyUsed) {
+                // startServer1()
+            } else {
+                // middleClient()
+            }
+        }, (reject) => {
+            console.log(`失败原因 ${reject}`)
+            startServer1()
+        })
     }
     startServer1()
 
@@ -39,16 +47,13 @@ module.exports = function (ip, port, jsonport) {
         /**
          * 执行client端，通过wsServer1与插件进行通信
          */
-        let socketCluster = require('socketcluster-client');
         socket1 = socketCluster.connect({
             hostname: HOST,
             port: port
         });
 
         socket1.on('connect', function (status) {
-            console.log('connect', status);
-            console.log(`app端通信websocket端口号为${port}`);
-            console.log('*'.repeat(50))
+            console.log('socket1 connect success', status);
         });
         socket1.on('disconnect', function (code) {
             console.warn('Socket disconnected with code', code);
@@ -96,7 +101,8 @@ module.exports = function (ip, port, jsonport) {
                 const channel = socket1.subscribe(channelName);
                 channel.watch(handleMessages);
                 socket1.on(channelName, handleMessages);
-                console.log('login成功', `channelName=====>${channelName}` );
+                console.log('login成功');
+                socket1.emit('log', { type: 'SERVERCLIENT1LOGINOK' });
             });
         }
         login();
@@ -159,8 +165,7 @@ module.exports = function (ip, port, jsonport) {
         })
 
         socket2.on("error", function (code, reason) {
-            console.log("***socket2异常关闭*** " + code);
-            console.log(reason);
+            console.log("***socket2异常关闭*** ", code, reason);
             // 通知devtools
             const message = { type: 'DISCONNECTED', code };
             socket1.emit('log', message);
@@ -204,16 +209,7 @@ module.exports = function (ip, port, jsonport) {
         socket1.emit(socket1.id ? 'log' : 'log-noid', message);
     }
 
-    function reconnect(url) {
-        if (lockReconnect) return;
-        lockReconnect = true;
-        setTimeout(function() {
-            connectVmapSourceDateServer(url);
-            lockReconnect = false;
-        }, 2000);
-    }
-
-    setTimeout(function () {
-        middleClient()
+    setTimeout(function(){
+        middleClient();
     }, 1000)
 };
