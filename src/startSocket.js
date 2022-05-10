@@ -16,7 +16,7 @@ let socketCluster = require('socketcluster-client');
  *  杀app进程，重连逻辑： server1， socket1 不动，只对 socket2 进行重连
  */
 
-module.exports = function (ip, port, jsonport) {
+module.exports = function (ip, port, jsonport, clientId) {
     let appPort = jsonport
     const vmap_json_key = 'vmap_debugtools_service'
     /**
@@ -126,7 +126,7 @@ module.exports = function (ip, port, jsonport) {
             ) {
                 const vmapItem = response.data.filter(item => item.title === vmap_json_key)
                 if (vmapItem && vmapItem.length) {
-                    connectVmapSourceDateServer(`ws://${appUrl}/devtools/page/${vmapItem[0].id}`)
+                    connectVmapSourceDateServer(`ws://${appUrl}/devtools/page/${vmapItem[0].id}` + (clientId ? `?client_id=${clientId}` : ''))
                 } else {
                     retryGetJson()
                 }
